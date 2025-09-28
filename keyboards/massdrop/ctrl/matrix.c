@@ -22,9 +22,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "clks.h"
 #include <string.h>
 
-matrix_row_t mlatest[MATRIX_ROWS];
-matrix_row_t mlast[MATRIX_ROWS];
-matrix_row_t mdebounced[MATRIX_ROWS];
+/* matrix state(1:on, 0:off) */
+static matrix_row_t raw_matrix[MATRIX_ROWS]; //raw values
+static matrix_row_t matrix[MATRIX_ROWS]; //raw values
+static matrix_row_t raw_matrix_prev[MATRIX_ROWS]; //raw values
+void debounce_init(uint8_t num_rows);
+void debounce(matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows, bool changed);
 
 uint8_t row_ports[] = { MATRIX_ROW_PORTS };
 uint8_t row_pins[] = { MATRIX_ROW_PINS };
@@ -52,9 +55,10 @@ void matrix_scan_user(void) {
 
 void matrix_init(void)
 {
-    memset(mlatest, 0, MATRIX_ROWS * sizeof(matrix_row_t));
-    memset(mlast, 0, MATRIX_ROWS * sizeof(matrix_row_t));
-    memset(mdebounced, 0, MATRIX_ROWS * sizeof(matrix_row_t));
+    // initialize matrix state: all keys off
+    memset(raw_matrix, 0, MATRIX_ROWS * sizeof(matrix_row_t));
+    memset(matrix, 0, MATRIX_ROWS * sizeof(matrix_row_t));
+    memset(raw_matrix_prev, 0, MATRIX_ROWS * sizeof(matrix_row_t));
 
     row_masks[PA] = 0;
     row_masks[PB] = 0;
@@ -76,20 +80,18 @@ void matrix_init(void)
         PORT->Group[col_ports[col]].OUTCLR.reg = 1 << col_pins[col]; //Low
     }
 
+    debounce_init(MATRIX_ROWS);
     matrix_init_quantum();
 }
 
-uint64_t mdebouncing = 0;
-bool debouncing = false;
-
 uint8_t matrix_scan(void)
 {
-    uint64_t timer;
     uint8_t row;
     uint8_t col;
     uint32_t scans[2]; //PA PB
+    bool changed = false;
 
-    memset(mlatest, 0, MATRIX_ROWS * sizeof(matrix_row_t)); //Zero the result buffer
+    memset(raw_matrix, 0, MATRIX_ROWS * sizeof(matrix_row_t));
 
     for (col = 0; col < MATRIX_COLS; col++)
     {
@@ -106,40 +108,28 @@ uint8_t matrix_scan(void)
         {
             //Move scan bits from scans array into proper row bit locations
             if (scans[row_ports[row]] & (1 << row_pins[row]))
-                mlatest[row] |= 1 << col;
+                raw_matrix[row] |= 1 << col;
         }
     }
 
-    timer = timer_read64();
-
-    for (row = 0; row < MATRIX_ROWS; row++)
-    {
-        if (mlast[row] != mlatest[row]) {
-            debouncing = true;
-            mdebouncing = timer + DEBOUNCE;
+    for (row = 0; row < MATRIX_ROWS; row++) {
+        if (raw_matrix[row] != raw_matrix_prev[row]) {
+            changed = true;
+            break;
         }
-
-        mlast[row] = mlatest[row];
     }
+    
+    debounce(raw_matrix, matrix, MATRIX_ROWS, changed);
 
-    if (debouncing && timer >= mdebouncing)
-    {
-        for (row = 0; row < MATRIX_ROWS; row++) {
-            mdebounced[row] = mlatest[row];
-        }
-
-        mdebouncing = 0;
-        debouncing = false;
-    }
+    memcpy(raw_matrix_prev, raw_matrix, MATRIX_ROWS * sizeof(matrix_row_t));
 
     matrix_scan_quantum();
-
     return 1;
 }
 
 matrix_row_t matrix_get_row(uint8_t row)
 {
-    return mdebounced[row];
+    return matrix[row];
 }
 
 void matrix_print(void)

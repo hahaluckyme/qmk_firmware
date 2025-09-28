@@ -34,3 +34,6 @@ AUTO_SHIFT_ENABLE = no      # Auto Shift
 
 # Custom RGB matrix handling
 RGB_MATRIX_ENABLE = custom
+
+# debounce immediate send
+DEBOUNCE_TYPE = asym_eager_defer_pk
